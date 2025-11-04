@@ -1,69 +1,61 @@
 #!/bin/bash
-echo "🔧 Setting up system for Arduino + Python display control..."
 
-# Step 1: Install Homebrew if not already installed
-if ! command -v brew &> /dev/null
-then
+echo "🔧 Setting up system for Arduino + Python Display Controller..."
+
+# Step 1: Install Homebrew if missing
+if ! command -v brew &>/dev/null; then
     echo "🍺 Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-    # Add Homebrew to PATH immediately for this session
-    if [ -d "/opt/homebrew/bin" ]; then
-        echo "🔗 Adding Homebrew to PATH for current session..."
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    fi
+    echo "🔧 Adding Homebrew to PATH..."
+    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+    eval "$(/opt/homebrew/bin/brew shellenv)"
 else
     echo "✅ Homebrew already installed."
     eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
-# Step 1b: Confirm Homebrew is usable
-if ! command -v brew &> /dev/null; then
-    echo "❌ Homebrew not found even after installation."
-    echo "➡️ Please restart Terminal and re-run this command."
-    exit 1
-fi
-
-# Step 2: Install Arduino IDE
-if ! brew list --cask | grep -q "arduino"; then
-    echo "🔌 Installing Arduino IDE..."
-    brew install --cask arduino
+# Step 2: Install Arduino IDE (modern version)
+echo "🔌 Installing Arduino IDE (2.x)..."
+if brew install --cask arduino-ide; then
+    echo "✅ Arduino IDE installed successfully."
 else
-    echo "✅ Arduino IDE already installed."
+    echo "⚠️ Homebrew Arduino IDE installation failed."
+    echo "➡️ Please install manually from: https://www.arduino.cc/en/software"
 fi
 
-# Step 3: Install Python3
-if ! command -v python3 &> /dev/null
-then
+# Step 3: Ensure Python3 is available
+if command -v python3 &>/dev/null; then
+    echo "✅ Python3 already installed."
+else
     echo "🐍 Installing Python3..."
     brew install python
-else
-    echo "✅ Python3 already installed."
 fi
 
 # Step 4: Install Python dependencies
 echo "📦 Installing Python dependencies..."
-python3 -m pip install --upgrade pip --no-warn-script-location
-python3 -m pip install pyserial opencv-python numpy --no-warn-script-location
+python3 -m pip install --upgrade pip
+python3 -m pip install pyserial opencv-python numpy
 
-# Step 5: Create a folder for the project
+# Step 5: Create Arduino + Python project structure
+echo "💾 Creating project files..."
 mkdir -p ~/Arduino_Display_Project
 cd ~/Arduino_Display_Project || exit
 
-# Step 6: Create project files
-echo "💾 Creating project files..."
-
+########################################
 # Arduino sketch
-cat << 'EOF' > arduino_display.ino
-// Arduino distance-based trigger
+########################################
+cat <<'EOF' > arduino_display.ino
 const int numSensors = 1;
 const int sensorPins[numSensors] = {A0};
+
+// Output pin to trigger external system (black image)
 const int triggerPin = 8;
 
 void setup() {
   Serial.begin(9600);
   pinMode(triggerPin, OUTPUT);
-  digitalWrite(triggerPin, LOW);  // Image visible at start
+  digitalWrite(triggerPin, LOW);  // image visible at start
 }
 
 void loop() {
@@ -73,6 +65,7 @@ void loop() {
     int rawValue = analogRead(sensorPins[i]);
     float distance = rawToDistance(rawValue);
 
+    // Debugging: print values
     Serial.print("Sensor ");
     Serial.print(i);
     Serial.print(": ");
@@ -85,73 +78,67 @@ void loop() {
   }
 
   if (objectDetected) {
-    digitalWrite(triggerPin, HIGH);
+    digitalWrite(triggerPin, HIGH);  // tell system to show black image
     Serial.println("Object detected → Black image ON");
   } else {
-    digitalWrite(triggerPin, LOW);
+    digitalWrite(triggerPin, LOW);   // normal image
     Serial.println("Clear → Normal image");
   }
 
-  delay(100);
+  delay(100); // small delay for stability
 }
 
+// Convert raw analog reading to distance in cm
 float rawToDistance(int rawValue) {
-  if (rawValue <= 17) return 150; // Avoid divide-by-zero
+  // Approximation formula for GP2Y0A02YK0F
+  // Distance (cm) ≈ 10650 / (rawValue - 17)
+  if (rawValue <= 17) return 150; // avoid divide-by-zero
   float distance = 10650.0 / (rawValue - 17);
-  if (distance > 150) distance = 150;
-  if (distance < 20) distance = 20;
+  if (distance > 150) distance = 150;  // cap to sensor max
+  if (distance < 20) distance = 20;    // cap to sensor min
   return distance;
 }
 EOF
 
+########################################
 # Python script
-cat << 'EOF' > display_control.py
+########################################
+cat <<'EOF' > display_control.py
 import serial
 import cv2
 import numpy as np
 import time
-import sys
-import glob
-import os
 
-def find_arduino_port():
-    """Auto-detect Arduino serial port"""
-    ports = glob.glob('/dev/cu.usb*') + glob.glob('/dev/ttyUSB*')
-    for port in ports:
-        try:
-            s = serial.Serial(port)
-            s.close()
-            return port
-        except (OSError, serial.SerialException):
-            pass
-    return None
+# 1️⃣ Change this to your actual Arduino port
+# Windows example: 'COM3' or 'COM4'
+# Linux/Mac example: '/dev/ttyACM0' or '/dev/ttyUSB0'
+arduino = serial.Serial('/dev/cu.usbserial-210', 9600, timeout=1)
+time.sleep(2)  # Give Arduino time to start
 
-print("🔍 Searching for Arduino...")
-port = find_arduino_port()
-if not port:
-    print("⚠️ No Arduino detected. Please plug it in and try again.")
-    sys.exit(1)
-print(f"✅ Arduino detected on {port}")
-
-arduino = serial.Serial(port, 9600, timeout=1)
-time.sleep(2)
-
-image_path = '/Users/rahuljuneja/Downloads/123.png'
+# 2️⃣ Load your display image
+image_path = '/Users/rahuljuneja/Downloads/123.png'   # your main image file
 image = cv2.imread(image_path)
-if image is None:
-    print("⚠️ Could not find image file at", image_path)
-    sys.exit(1)
 
+if image is None:
+    print("⚠️ Could not find image. Please check the path.")
+    exit()
+
+# 3️⃣ Create a black image (same size as your main image)
 black_image = np.zeros_like(image)
+
+# 4️⃣ Setup window
 window_name = "Display"
 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
 show_black = False
+
 print("✅ Running... Press ESC to quit.")
 
+# 5️⃣ Loop forever
 while True:
     line = arduino.readline().decode(errors='ignore').strip()
+
     if line:
         print(line)
         if "Object detected" in line:
@@ -159,22 +146,28 @@ while True:
         elif "Clear" in line:
             show_black = False
 
+    # 6️⃣ Show appropriate image
     if show_black:
         cv2.imshow(window_name, black_image)
     else:
         cv2.imshow(window_name, image)
 
-    if cv2.waitKey(10) == 27:  # ESC
+    # Exit on ESC key
+    if cv2.waitKey(10) == 27:
         break
 
 arduino.close()
 cv2.destroyAllWindows()
 EOF
 
+########################################
+# Wrap-up
+########################################
+echo ""
 echo "🎉 Setup complete!"
-echo
 echo "➡️ Open Arduino IDE, load ~/Arduino_Display_Project/arduino_display.ino, and upload to your Arduino."
-echo "➡️ Then run this command in Terminal after plugging in Arduino:"
+echo "➡️ Then run this command in Terminal after plugging in your Arduino:"
+echo ""
 echo "   python3 ~/Arduino_Display_Project/display_control.py"
-echo
-echo "💡 Tip: To re-run anytime, simply execute the same command again. It’s safe and repeatable."
+echo ""
+echo "💡 Tip: Update the correct serial port path in display_control.py (e.g., '/dev/cu.usbserial-XXX')."
