@@ -77,14 +77,19 @@ cd "$PROJECT_DIR" || exit
 echo "📂 Project directory: $PROJECT_DIR"
 
 ########################################
-# 6. Copy image (expects work.jpg in same folder as this script)
+# 6. Get image from GitHub (auto-download)
 ########################################
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/work.jpg" ]; then
-    echo "🖼️ Copying work.jpg to project folder..."
-    cp "$SCRIPT_DIR/work.jpg" "$PROJECT_DIR/work.jpg"
+IMAGE_URL="https://raw.githubusercontent.com/junejarahul99/art-arduino-setup/main/work.jpg"
+IMAGE_PATH="$PROJECT_DIR/work.jpg"
+
+echo "🖼️ Ensuring work.jpg is available..."
+if [ ! -f "$IMAGE_PATH" ]; then
+    echo "⬇️ Downloading work.jpg from GitHub..."
+    curl -fsSL "$IMAGE_URL" -o "$IMAGE_PATH" || {
+        echo "⚠️ Failed to download work.jpg — please place it manually in $PROJECT_DIR"
+    }
 else
-    echo "⚠️ No work.jpg found next to setup.sh. Please place it beside the script before running."
+    echo "✅ work.jpg already present in project directory."
 fi
 
 ########################################
