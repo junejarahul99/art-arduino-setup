@@ -26,13 +26,11 @@ fi
 echo "🛠 Checking Homebrew permissions..."
 BREW_PREFIX=$(brew --prefix)
 
-# ensure correct ownership
 if [ "$(stat -f '%Su' $BREW_PREFIX)" != "$(whoami)" ]; then
     echo "🧩 Fixing ownership of Homebrew folders..."
     sudo chown -R "$(whoami)":staff "$BREW_PREFIX"
 fi
 
-# remove stale locks and repair permissions
 echo "🧹 Cleaning old Homebrew locks..."
 sudo rm -rf "$BREW_PREFIX/var/homebrew/locks"/*.lock 2>/dev/null || true
 sudo mkdir -p "$BREW_PREFIX/var/homebrew/locks"
@@ -48,6 +46,11 @@ brew update --force --quiet || true
 # 3. Install Arduino IDE
 ########################################
 echo "🔌 Installing Arduino IDE (2.x)..."
+if [ -d "/Applications/Arduino IDE.app" ]; then
+    echo "🧹 Removing old Arduino IDE..."
+    sudo rm -rf "/Applications/Arduino IDE.app"
+fi
+
 if brew install --cask arduino-ide; then
     echo "✅ Arduino IDE installed successfully."
 else
@@ -74,7 +77,18 @@ cd "$PROJECT_DIR" || exit
 echo "📂 Project directory: $PROJECT_DIR"
 
 ########################################
-# 6. Virtual environment + dependencies
+# 6. Copy image (expects work.jpg in same folder as this script)
+########################################
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/work.jpg" ]; then
+    echo "🖼️ Copying work.jpg to project folder..."
+    cp "$SCRIPT_DIR/work.jpg" "$PROJECT_DIR/work.jpg"
+else
+    echo "⚠️ No work.jpg found next to setup.sh. Please place it beside the script before running."
+fi
+
+########################################
+# 7. Virtual environment + dependencies
 ########################################
 if [ ! -d "venv" ]; then
     echo "📦 Creating Python virtual environment..."
@@ -87,7 +101,7 @@ pip install --upgrade pip
 pip install pyserial opencv-python numpy
 
 ########################################
-# 7. Arduino sketch
+# 8. Arduino sketch
 ########################################
 cat <<'EOF' > arduino_display.ino
 const int numSensors = 1;
@@ -139,7 +153,7 @@ float rawToDistance(int rawValue) {
 EOF
 
 ########################################
-# 8. Python display control
+# 9. Python display control
 ########################################
 cat <<'EOF' > display_control.py
 import serial
@@ -147,10 +161,11 @@ import cv2
 import numpy as np
 import time
 import sys
+import os
 
 SERIAL_PORT = '/dev/cu.usbserial-210'  # Change if needed
 BAUD_RATE = 9600
-IMAGE_PATH = '/Users/rahuljuneja/Downloads/123.png'
+IMAGE_PATH = os.path.expanduser('~/Arduino_Display_Project/work.jpg')
 
 print("🔌 Connecting to Arduino...")
 try:
@@ -191,7 +206,7 @@ cv2.destroyAllWindows()
 EOF
 
 ########################################
-# 9. Run helper
+# 10. Run helper
 ########################################
 cat <<'EOF' > run.sh
 #!/bin/bash
@@ -202,7 +217,7 @@ EOF
 chmod +x run.sh
 
 ########################################
-# 10. Wrap-up
+# 11. Wrap-up
 ########################################
 echo ""
 echo "🎉 Setup complete!"
@@ -211,4 +226,4 @@ echo "➡️ Then to run the display system, use:"
 echo ""
 echo "   bash ~/Arduino_Display_Project/run.sh"
 echo ""
-echo "💡 Tip: The script auto-fixes Homebrew permissions, so no manual brew repair needed."
+echo "💡 Make sure 'work.jpg' is beside setup.sh before you start."
