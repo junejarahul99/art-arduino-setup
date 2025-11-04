@@ -2,7 +2,18 @@
 
 echo "🔧 Setting up system for Arduino + Python Display Controller (sandboxed)..."
 
-# Step 1: Install Homebrew if missing
+########################################
+# 0. Pre-flight check
+########################################
+set -e  # Stop on errors
+trap 'echo "❌ Setup failed at line $LINENO. Check the output above."' ERR
+
+# Ask for sudo at the start
+sudo -v
+
+########################################
+# 1. Install / Repair Homebrew
+########################################
 if ! command -v brew &>/dev/null; then
     echo "🍺 Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -13,7 +24,15 @@ else
     eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
-# Step 2: Install Arduino IDE (modern version)
+# Fix Homebrew permissions
+echo "🛠 Fixing Homebrew permissions..."
+sudo chown -R "$(whoami)" /opt/homebrew
+sudo chmod -R u+w /opt/homebrew
+rm -f /opt/homebrew/var/homebrew/locks/*.lock 2>/dev/null || true
+
+########################################
+# 2. Install Arduino IDE (modern version)
+########################################
 echo "🔌 Installing Arduino IDE (2.x)..."
 if brew install --cask arduino-ide; then
     echo "✅ Arduino IDE installed successfully."
@@ -22,28 +41,47 @@ else
     echo "➡️ Please install manually from: https://www.arduino.cc/en/software"
 fi
 
-# Step 3: Ensure Python3 is available
+########################################
+# 3. Ensure Python3 is available
+########################################
 if ! command -v python3 &>/dev/null; then
     echo "🐍 Installing Python3..."
     brew install python
+else
+    echo "✅ Python3 already installed."
 fi
 
-# Step 4: Create project folder
-mkdir -p ~/Arduino_Display_Project
-cd ~/Arduino_Display_Project || exit
+########################################
+# 4. Create project folder
+########################################
+PROJECT_DIR="$HOME/Arduino_Display_Project"
+echo "📂 Setting up project directory at: $PROJECT_DIR"
+mkdir -p "$PROJECT_DIR"
+cd "$PROJECT_DIR" || exit
 
-echo "📦 Creating Python virtual environment..."
-python3 -m venv venv
+########################################
+# 5. Create virtual environment
+########################################
+if [ -d "venv" ]; then
+    echo "♻️ Existing virtual environment found. Reusing..."
+else
+    echo "📦 Creating Python virtual environment..."
+    python3 -m venv venv
+fi
+
 source venv/bin/activate
 
-# Step 5: Install dependencies inside venv
-echo "📦 Installing isolated dependencies..."
+########################################
+# 6. Install Python dependencies
+########################################
+echo "📦 Installing Python dependencies..."
 pip install --upgrade pip
 pip install pyserial opencv-python numpy
 
 ########################################
-# Arduino sketch
+# 7. Arduino sketch
 ########################################
+echo "🧩 Writing Arduino sketch..."
 cat <<'EOF' > arduino_display.ino
 const int numSensors = 1;
 const int sensorPins[numSensors] = {A0};
@@ -94,23 +132,32 @@ float rawToDistance(int rawValue) {
 EOF
 
 ########################################
-# Python script
+# 8. Python display control script
 ########################################
+echo "🖥 Creating Python display control script..."
 cat <<'EOF' > display_control.py
 import serial
 import cv2
 import numpy as np
 import time
+import sys
 
-arduino = serial.Serial('/dev/cu.usbserial-210', 9600, timeout=1)
-time.sleep(2)
+SERIAL_PORT = '/dev/cu.usbserial-210'  # Update if needed
+BAUD_RATE = 9600
+IMAGE_PATH = '/Users/rahuljuneja/Downloads/123.png'
 
-image_path = '/Users/rahuljuneja/Downloads/123.png'
-image = cv2.imread(image_path)
+print("🔌 Connecting to Arduino...")
+try:
+    arduino = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+    time.sleep(2)
+except serial.SerialException:
+    print(f"⚠️ Could not open port {SERIAL_PORT}. Please update the path.")
+    sys.exit(1)
 
+image = cv2.imread(IMAGE_PATH)
 if image is None:
-    print("⚠️ Could not find image. Please check the path.")
-    exit()
+    print(f"⚠️ Could not find image at {IMAGE_PATH}")
+    sys.exit(1)
 
 black_image = np.zeros_like(image)
 window_name = "Display"
@@ -130,10 +177,8 @@ while True:
         elif "Clear" in line:
             show_black = False
 
-    if show_black:
-        cv2.imshow(window_name, black_image)
-    else:
-        cv2.imshow(window_name, image)
+    frame = black_image if show_black else image
+    cv2.imshow(window_name, frame)
 
     if cv2.waitKey(10) == 27:
         break
@@ -143,7 +188,7 @@ cv2.destroyAllWindows()
 EOF
 
 ########################################
-# Add launch helper
+# 9. Run helper
 ########################################
 cat <<'EOF' > run.sh
 #!/bin/bash
@@ -154,13 +199,31 @@ EOF
 chmod +x run.sh
 
 ########################################
-# Wrap-up
+# 10. Optional Self-Test
+########################################
+if [[ "$1" == "--self-test" ]]; then
+    echo "🧪 Running self-test (no Arduino needed)..."
+    source venv/bin/activate
+    python3 - <<'PYCODE'
+import cv2, numpy as np, time
+print("✅ OpenCV test window will appear for 2 seconds...")
+img = np.zeros((300, 300, 3), dtype=np.uint8)
+cv2.putText(img, "Self-Test OK", (40, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+cv2.imshow("Test", img)
+cv2.waitKey(2000)
+cv2.destroyAllWindows()
+PYCODE
+fi
+
+########################################
+# 11. Wrap-up
 ########################################
 echo ""
 echo "🎉 Setup complete!"
-echo "➡️ Open Arduino IDE, load ~/Arduino_Display_Project/arduino_display.ino, and upload it to your Arduino."
-echo "➡️ Then to run the display system, use:"
+echo "➡️ Open Arduino IDE and upload:"
+echo "   $PROJECT_DIR/arduino_display.ino"
 echo ""
-echo "   bash ~/Arduino_Display_Project/run.sh"
+echo "➡️ Then run the display system with:"
+echo "   bash $PROJECT_DIR/run.sh"
 echo ""
-echo "💡 Tip: Update the serial port path in display_control.py if needed."
+echo "💡 Tip: Use '--self-test' when running setup to verify OpenCV display works."
